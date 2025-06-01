@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BPA - Gerador de Relatório</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        .welcome-message {
+            text-align: center;
+            margin-top: 10px;
+        }
+        .competencia-container {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .competencia-container select {
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        .competencia-container select:disabled {
+            background-color: #f5f5f5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>Gerador de Relatório BPA</h1>
+    <form method="post">
+        <label for="tipo_relatorio">Tipo de Relatório:</label>
+        <select id="tipo_relatorio" name="tipo_relatorio" required>
+            <option value="consolidado">Consolidado</option>
+            <option value="individualizada">Individualizada</option>
+        </select>
+        
+        <br><br>
+        <label>Competência:</label>
+        <div class="competencia-container">
+            <select id="mes" name="mes" required>
+                <option value="01">Janeiro</option>
+                <option value="02">Fevereiro</option>
+                <option value="03">Março</option>
+                <option value="04">Abril</option>
+                <option value="05">Maio</option>
+                <option value="06">Junho</option>
+                <option value="07">Julho</option>
+                <option value="08">Agosto</option>
+                <option value="09">Setembro</option>
+                <option value="10">Outubro</option>
+                <option value="11">Novembro</option>
+                <option value="12">Dezembro</option>
+            </select>
+            <select id="ano" name="ano" disabled>
+                <option value="2025" selected>2025</option>
+            </select>
+            <input type="hidden" id="year_month" name="year_month" value="">
+        </div>
+        
+        <br><br>
+        <button type="submit">Gerar Relatório</button>
+    </form>
+    
+    {% if error %}
+    <div class="error-message">
+        {{ error }}
+    </div>
+    {% endif %}
+    
+    <br>
+    <form action="{{ url_for('logout') }}" method="post">
+        <button type="submit">Logout</button>
+    </form>
+
+    <script>
+        // Função para atualizar o campo year_month quando o mês for alterado
+        function updateYearMonth() {
+            const mes = document.getElementById('mes').value;
+            const ano = document.getElementById('ano').value;
+            document.getElementById('year_month').value = ano + mes;
+        }
+
+        // Atualiza o campo year_month quando a página carrega
+        document.addEventListener('DOMContentLoaded', function() {
+            updateYearMonth();
+            
+            // Atualiza quando o mês for alterado
+            document.getElementById('mes').addEventListener('change', updateYearMonth);
+        });
+    </script>
+</body>
+</html>
