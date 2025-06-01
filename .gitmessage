@@ -1,0 +1,22 @@
+# <tipo>(<escopo>): <descrição curta>
+#
+# <descrição detalhada>
+#
+# <rodapé>
+#
+# Tipos:
+#   feat:     nova feature
+#   fix:      correção de bug
+#   docs:     mudanças na documentação
+#   style:    formatação, ponto e vírgula, etc; sem mudança de código
+#   refactor: refatoração de código
+#   test:     adição ou modificação de testes
+#   chore:    atualização de tarefas, configurações, etc
+#
+# Escopo:
+#   data-injector: mudanças no serviço de injeção de dados
+#   geradorbpa:    mudanças no serviço de geração de relatórios
+#
+# Rodapé:
+#   - BREAKING CHANGE: mudança que quebra compatibilidade
+#   - Closes #<issue> 

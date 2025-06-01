@@ -1,0 +1,10 @@
+[core]
+    autocrlf = true
+    safecrlf = true
+[user]
+    name = Andre
+    email = andre@innovadata.com.br
+[init]
+    defaultBranch = main
+[commit]
+    template = .gitmessage 
