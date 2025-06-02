@@ -6,12 +6,12 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="geradorbpa",
     version="0.1.0",
-    author="André",
-    author_email="seu.email@exemplo.com",
+    author="Equipe BPA",
+    author_email="contato@bpa.com",
     description="Gerador de Boletins de Produção Ambulatorial (BPA)",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/seu-usuario/geradorbpa",
+    url="https://github.com/equipe-bpa/geradorbpa",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",
