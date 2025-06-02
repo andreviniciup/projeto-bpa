@@ -11,7 +11,8 @@ from app.services.data_validator import (
     validate_database_schema,
     parse_layout_file,
     validate_fixed_width_data,
-    parse_fixed_width_data
+    parse_fixed_width_data,
+    get_column_mapping_for_table
 )
 from app.services.error_handler import ErrorHandler
 from app.services.database_service import insert_records_safely_sync, insert_records_safely
@@ -116,8 +117,19 @@ class DataSyncService:
         """
         Carrega dados do arquivo usando o layout
         """
-        layout_columns = parse_layout_file(layout_file_path)
-        return parse_fixed_width_data(data_file_path, layout_columns)
+        try:
+            layout_columns = parse_layout_file(layout_file_path)
+            
+            # Lê o arquivo de dados
+            with open(data_file_path, 'r', encoding='utf-8') as f:
+                data = f.read()
+            
+            # Processa os dados usando o layout
+            return parse_fixed_width_data(data, layout_columns)
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao carregar dados do arquivo: {str(e)}")
+            raise
 
     def _insert_data_to_table(self, session: Session, table_name: str, records: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -139,56 +151,116 @@ class DataSyncService:
             self.logger.error(f"Erro ao inserir dados na tabela {table_name}: {str(e)}")
             return {'success': False, 'error': str(e)}
 
-    def sync_table_data(self, table_name: str, data_file_path: str, layout_file_path: str) -> Dict[str, Any]:
+    def sync_table_data(self, table_name: str, data_file: str, layout_file: str) -> Dict[str, Any]:
+        """
+        Sincroniza os dados de um arquivo com a tabela do banco de dados.
+        
+        Args:
+            table_name: Nome da tabela
+            data_file: Caminho do arquivo de dados
+            layout_file: Caminho do arquivo de layout
+            
+        Returns:
+            Dict com o resultado da sincronização
+        """
         try:
-            # Valida estrutura da tabela com mapeamento
-            validation_result = self.validator.validate_table_structure(table_name, layout_file_path)
-            if not validation_result.get('valid', False):
-                return {'status': 'error', 'message': validation_result.get('error', 'Erro na validação')}
+            # Valida a estrutura da tabela e obtém o mapeamento de colunas
+            if not validate_database_schema(table_name, layout_file):
+                raise ValueError(f"Schema da tabela {table_name} não corresponde ao layout")
+                
+            column_mapping = get_column_mapping_for_table(table_name, layout_file)
             
-            # Obtém o mapeamento de colunas
-            column_mapping = validation_result.get('column_mapping', {})
+            # Carrega os dados do arquivo
+            with open(data_file, 'r', encoding='utf-8') as f:
+                data_content = f.read()
+                
+            # Processa os dados usando o layout
+            records = parse_fixed_width_data(data_content, layout_file)
             
-            with SessionLocal() as session:
-                try:
-                    # Carrega dados do arquivo
-                    data_records = self._load_data_from_file(data_file_path, layout_file_path)
-                    if not data_records:
-                        return {'status': 'warning', 'message': 'Nenhum dado encontrado no arquivo'}
-
-                    # Converte os dados usando o mapeamento de colunas
-                    mapped_records = []
-                    for record in data_records:
-                        mapped_record = {}
-                        for layout_col, value in record.items():
-                            if layout_col in column_mapping:
-                                db_col = column_mapping[layout_col]
-                                mapped_record[db_col] = value
-                        mapped_records.append(mapped_record)
-
-                    # Insere dados na tabela
-                    insert_result = self._insert_data_to_table(session, table_name, mapped_records)
-                    
-                    if insert_result['success']:
-                        session.commit()
-                        return {
-                            'status': 'success', 
-                            'message': f'Dados sincronizados com sucesso para {table_name}',
-                            'records_inserted': insert_result.get('records_inserted', 0),
-                            'column_mapping': column_mapping
-                        }
+            # Busca registros existentes
+            logger.info(f"Buscando registros existentes em {table_name}")
+            existing_records = self._get_existing_records(SessionLocal(), table_name)
+            logger.info(f"Encontrados {len(existing_records)} registros existentes em {table_name}")
+            
+            # Cria um dicionário para busca rápida dos registros existentes
+            existing_dict = {
+                (r['co_procedimento'], r['co_procedimento_origem'], r['dt_competencia']): r 
+                for r in existing_records
+            }
+            
+            # Listas para armazenar registros a serem inseridos/atualizados
+            to_insert = []
+            to_update = []
+            unchanged = 0
+            
+            # Processa cada registro
+            for record in records:
+                # Cria a chave para busca
+                key = (
+                    record['CO_PROCEDIMENTO'],
+                    record['CO_PROCEDIMENTO_ORIGEM'],
+                    record['DT_COMPETENCIA']
+                )
+                
+                if key in existing_dict:
+                    # Registro existe, verifica se precisa atualizar
+                    existing = existing_dict[key]
+                    if self._records_are_different(record, existing):
+                        to_update.append(record)
                     else:
-                        session.rollback()
-                        return {'status': 'error', 'message': insert_result.get('error', 'Erro na inserção')}
-                        
-                except Exception as e:
-                    session.rollback()
-                    self.logger.error(f"Erro ao sincronizar dados da tabela {table_name}: {str(e)}")
-                    return {'status': 'error', 'message': f'Erro ao sincronizar dados: {str(e)}'}
-                    
+                        unchanged += 1
+                else:
+                    # Registro não existe, será inserido
+                    to_insert.append(record)
+            
+            # Executa as operações no banco
+            inserted = 0
+            updated = 0
+            
+            if to_insert:
+                inserted = self._insert_data_to_table(SessionLocal(), table_name, to_insert)['records_inserted']
+                
+            if to_update:
+                updated = self._insert_data_to_table(SessionLocal(), table_name, to_update)['records_inserted']
+            
+            return {
+                'status': 'success',
+                'message': f'Sincronização concluída: {inserted} inseridos, {updated} atualizados, {unchanged} não alterados',
+                'details': {
+                    'inserted': inserted,
+                    'updated': updated,
+                    'unchanged': unchanged
+                }
+            }
+            
         except Exception as e:
-            self.logger.error(f"Erro ao sincronizar tabela {table_name}: {str(e)}")
-            return {'status': 'error', 'message': str(e)}
+            logger.error(f"Erro ao sincronizar dados da tabela {table_name}: {str(e)}")
+            return {
+                'status': 'error',
+                'message': str(e)
+            }
+            
+    def _records_are_different(self, new_record: Dict[str, Any], existing_record: Dict[str, Any]) -> bool:
+        """
+        Compara dois registros para verificar se há diferenças.
+        
+        Args:
+            new_record: Novo registro
+            existing_record: Registro existente
+            
+        Returns:
+            True se houver diferenças, False caso contrário
+        """
+        # Compara cada campo do registro
+        for key, value in new_record.items():
+            # Converte o valor para string para comparação
+            new_value = str(value).strip()
+            existing_value = str(existing_record.get(key, '')).strip()
+            
+            if new_value != existing_value:
+                return True
+                
+        return False
 
     def sync_table_data_old(self, table_name: str, data_file_path: str, layout_file_path: str) -> Dict[str, Any]:
         try:
