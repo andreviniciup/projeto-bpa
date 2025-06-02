@@ -45,8 +45,8 @@ docker-compose up -d
 5. Gera relatórios e documentos BPA
 
 ## Portas dos Serviços
-- Data Injector: `http://localhost:5000`
-- Gerador BPA: `http://localhost:5001`
+- Data Injector: `http://localhost:8000`
+- Gerador BPA: `http://localhost:5000`
 
 ## Documentação Detalhada
 - [Documentação do Data Injector](data-injector/README.md)
