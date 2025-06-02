@@ -126,69 +126,21 @@ class DataValidator:
             return {'valid': False, 'error': str(e)}
 
 
-def validate_database_schema(table_name: str, layout_columns: List[Dict[str, Any]]) -> bool:
+def validate_database_schema(table_name: str, layout_file: str) -> bool:
     """
-    Valida se o layout corresponde à estrutura da tabela no banco de dados.
-    Ignora colunas extras no banco (como chaves primárias autoincrementadas).
+    Valida se o schema da tabela corresponde ao layout do arquivo.
     
     Args:
         table_name: Nome da tabela
-        layout_columns: Colunas do layout
+        layout_file: Caminho do arquivo de layout
         
     Returns:
-        Booleano indicando se o layout é válido
+        bool: True se o schema é válido, False caso contrário
     """
     try:
-        # Mapeamento de tipos de dados de Oracle para PostgreSQL
-        def map_oracle_to_postgres(oracle_type: str) -> str:
-            type_mapping = {
-                'VARCHAR2': 'character varying',
-                'NUMBER': 'numeric',
-                'CHAR': 'character',
-                'DATE': 'date'
-            }
-            return type_mapping.get(oracle_type, oracle_type.lower())
-        
-        # Obtém colunas do banco de dados
-        with SessionLocal() as session:
-            # Consulta SQL simplificada para depuração
-            query = text("""
-                SELECT column_name, data_type 
-                FROM information_schema.columns 
-                WHERE table_name = :table 
-                AND table_schema = :schema
-            """)
+        # Usa a nova função de validação que já está implementada corretamente
+        return validate_database_schema_new(table_name, layout_file)
             
-            # Log para debug: imprime a consulta SQL
-            logger.info(f"Executando consulta SQL simplificada: {query}")
-            
-            result = session.execute(query, {'table': table_name, 'schema': settings.DATABASE_SCHEMA})
-            db_columns = [(row.column_name.lower(), row.data_type) for row in result]  # Converte para minúsculo
-        
-        # Log para debug: imprime o nome da tabela e o schema
-        logger.info(f"Validando tabela: {table_name}, schema: {settings.DATABASE_SCHEMA}")
-        logger.info(f"Colunas do banco de dados (consulta simplificada): {[col[0] for col in db_columns]}")
-        logger.info(f"Colunas do layout: {[col['Coluna'] for col in layout_columns]}")
-        
-        # Verifica se cada coluna do layout existe no banco (ignorando case)
-        for layout_col in layout_columns:
-            layout_col_name = layout_col['Coluna'].lower()  # Converte para minúsculo
-            found = False
-            for db_col, db_type in db_columns:
-                if db_col == layout_col_name:  # Compara em minúsculo
-                    found = True
-                    # Mapeia e compara tipos de dados
-                    mapped_layout_type = map_oracle_to_postgres(layout_col['Tipo'])
-                    if not db_type.startswith(mapped_layout_type):
-                        logger.error(f"Tipo de dados incompatível para coluna {layout_col_name}: Layout ({layout_col['Tipo']}) vs DB ({db_type})")
-                        return False
-                    break
-            if not found:
-                logger.error(f"Coluna {layout_col['Coluna']} (layout) não encontrada no banco de dados ({[col[0] for col in db_columns]})")
-                return False
-        
-        return True
-    
     except Exception as e:
         logger.error(f"Erro na validação do schema: {str(e)}")
         return False
@@ -267,166 +219,116 @@ def check_table_exists(table_name: str) -> bool:
 
 def validate_fixed_width_data(data_file_path: str, layout_columns: List[Dict[str, Any]], encoding: str = None) -> bool:
     """
-    Valida o arquivo de dados de largura fixa.
+    Valida se os dados do arquivo correspondem ao layout especificado.
     
     Args:
         data_file_path: Caminho do arquivo de dados
-        layout_columns: Informações do layout
-        encoding: Encoding do arquivo (opcional)
+        layout_columns: Lista de dicionários com as configurações das colunas
+        encoding: Codificação do arquivo (opcional)
         
     Returns:
-        Booleano indicando se os dados estão no formato correto
+        Booleano indicando se os dados são válidos
     """
-    # Lista de possíveis encodings para tentar
-    possible_encodings = [
-        encoding,  # Primeiro, tenta o encoding fornecido
-        'utf-8', 
-        'iso-8859-1', 
-        'windows-1252', 
-        'latin1'
-    ]
-    
-    # Remove None do início da lista
-    possible_encodings = [enc for enc in possible_encodings if enc is not None]
-    
-    for current_encoding in possible_encodings:
-        try:
-            with open(data_file_path, 'r', encoding=current_encoding) as file:
-                for line_num, line in enumerate(file, 1):
-                    # Remove newline e verifica comprimento total
-                    line = line.rstrip('\n')
-                    total_expected_length = int(layout_columns[-1]['Fim'])
-                    
-                    if len(line) != total_expected_length:
-                        logger.error(f"Linha {line_num}: Comprimento incorreto. Esperado {total_expected_length}, encontrado {len(line)}")
-                        return False
-                    
-                    # Valida cada coluna
-                    for col in layout_columns:
-                        start = int(col['Inicio']) - 1
-                        end = int(col['Fim'])
-                        value = line[start:end]
-                        
-                        # Validações específicas por tipo
-                        if col['Tipo'] == 'NUMBER':
-                            try:
-                                float(value.strip())
-                            except ValueError:
-                                logger.error(f"Linha {line_num}, Coluna {col['Coluna']}: Valor não numérico")
-                                return False
-            
-            # Se chegou até aqui, a validação com este encoding foi bem-sucedida
-            if current_encoding != encoding:
-                logger.info(f"Usando encoding: {current_encoding}")
-            return True
+    try:
+        # Lê o arquivo de dados
+        with open(data_file_path, 'r', encoding=encoding or 'utf-8') as f:
+            data = f.read()
         
-        except UnicodeDecodeError:
-            # Continua para o próximo encoding se houver erro de decodificação
-            continue
-        except Exception as e:
-            logger.error(f"Erro na validação dos dados: {str(e)}")
+        # Processa os dados usando o layout
+        from app.utils.fixed_width import parse_fixed_width_data
+        records = parse_fixed_width_data(data, layout_columns)
+        
+        if not records:
+            logger.error("Nenhum registro encontrado no arquivo")
             return False
-    
-    # Se nenhum encoding funcionou
-    logger.error("Não foi possível decodificar o arquivo com os encodings testados")
-    return False
+        
+        logger.info(f"Validados {len(records)} registros do arquivo")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Erro na validação dos dados: {str(e)}")
+        return False
 
-def parse_fixed_width_data(data_file_path: str, layout_columns: List[Dict[str, Any]], encoding: str = None) -> List[Dict[str, Any]]:
+def parse_fixed_width_data(data: str, layout_file: str) -> List[Dict[str, Any]]:
     """
-    Converte arquivo de largura fixa para lista de dicionários.
+    Converte dados de largura fixa para lista de dicionários.
     
     Args:
-        data_file_path: Caminho do arquivo de dados
-        layout_columns: Informações do layout
-        encoding: Encoding do arquivo (opcional)
+        data: String contendo os dados
+        layout_file: Caminho do arquivo de layout
         
     Returns:
         Lista de dicionários com os registros
     """
-    # Lista de possíveis encodings para tentar
-    possible_encodings = [
-        encoding,  # Primeiro, tenta o encoding fornecido
-        'utf-8', 
-        'iso-8859-1', 
-        'windows-1252', 
-        'latin1'
-    ]
-    
-    # Remove None do início da lista
-    possible_encodings = [enc for enc in possible_encodings if enc is not None]
-    
-    successful_encoding = None
-    
-    for current_encoding in possible_encodings:
-        try:
-            records = []
-            
-            with open(data_file_path, 'r', encoding=current_encoding) as file:
-                for line_num, line in enumerate(file, 1):
-                    # Remove quebras de linha e espaços extras
-                    line = line.rstrip('\n')
-                    
-                    # Verifica se a linha tem o comprimento esperado
-                    expected_length = int(layout_columns[-1]['Fim'])
-                    if len(line) != expected_length:
-                        logger.warning(f"Linha {line_num}: Comprimento incorreto. Esperado {expected_length}, encontrado {len(line)}")
-                        # Ajusta a linha se for muito curta (preenche com espaços)
-                        if len(line) < expected_length:
-                            line = line.ljust(expected_length)
-                        # Trunca se for muito longa
-                        if len(line) > expected_length:
-                            line = line[:expected_length]
-                    
-                    record = {}
-                    for col in layout_columns:
-                        start = int(col['Inicio']) - 1
-                        end = int(col['Fim'])
-                        
-                        # Garante que os índices estão dentro dos limites
-                        if start >= len(line):
-                            value = ''
-                        elif end > len(line):
-                            value = line[start:].strip()
-                        else:
-                            value = line[start:end].strip()
-                        
-                        # Conversão de tipos consistente
-                        if col['Tipo'] == 'NUMBER':
-                            # Trata valores vazios como None
-                            if not value:
-                                value = None
-                            else:
-                                try:
-                                    # Remove caracteres não numéricos
-                                    clean_value = re.sub(r'[^0-9.-]', '', value)
-                                    value = float(clean_value) if clean_value else None
-                                except ValueError:
-                                    logger.warning(f"Linha {line_num}, Coluna {col['Coluna']}: Valor não numérico '{value}', convertendo para None")
-                                    value = None
-                        elif col['Tipo'] == 'CHAR':
-                            # Remove espaços extras para campos CHAR
-                            value = value.strip()
-                        
-                        record[col['Coluna']] = value
-                    
-                    records.append(record)
-            
-            # Se chegou até aqui, a leitura com este encoding foi bem-sucedida
-            successful_encoding = current_encoding
-            logger.info(f"Arquivo lido com sucesso usando encoding: {current_encoding}")
-            logger.info(f"Total de registros lidos: {len(records)}")
-            return records
+    try:
+        # Carrega o layout
+        layout_columns = parse_layout_file(layout_file)
+        logger.info(f"Layout carregado com {len(layout_columns)} colunas")
         
-        except UnicodeDecodeError:
-            # Continua para o próximo encoding se houver erro de decodificação
-            continue
-        except Exception as e:
-            logger.error(f"Erro na interpretação dos dados com encoding {current_encoding}: {str(e)}")
-            continue
-    
-    # Se nenhum encoding funcionou
-    logger.error("Não foi possível decodificar o arquivo com os encodings testados")
-    return []
+        # Verifica se o layout está no formato correto
+        if not isinstance(layout_columns, list):
+            raise ValueError("Layout deve ser uma lista de dicionários")
+            
+        for col in layout_columns:
+            if not isinstance(col, dict):
+                raise ValueError("Cada coluna do layout deve ser um dicionário")
+            required_keys = ['Coluna', 'Tamanho', 'Tipo']
+            for key in required_keys:
+                if key not in col:
+                    raise ValueError(f"Coluna do layout deve ter a chave '{key}'")
+        
+        records = []
+        lines = data.strip().split('\n')
+        
+        logger.info(f"Processando {len(lines)} linhas de dados")
+        
+        for line_num, line in enumerate(lines, 1):
+            if not line.strip():
+                continue
+                
+            record = {}
+            current_pos = 0
+            
+            for col in layout_columns:
+                field_name = col['Coluna']
+                field_size = int(col['Tamanho'])
+                
+                if current_pos + field_size > len(line):
+                    raise ValueError(f"Linha {line_num} muito curta para o campo {field_name}")
+                
+                value = line[current_pos:current_pos + field_size].strip()
+                
+                # Conversão de tipos consistente
+                if col['Tipo'] == 'NUMBER':
+                    # Trata valores vazios como None
+                    if not value:
+                        value = None
+                    else:
+                        try:
+                            # Remove caracteres não numéricos
+                            clean_value = re.sub(r'[^0-9.-]', '', value)
+                            value = float(clean_value) if clean_value else None
+                        except ValueError:
+                            logger.warning(f"Linha {line_num}, Coluna {field_name}: Valor não numérico '{value}', convertendo para None")
+                            value = None
+                elif col['Tipo'] == 'CHAR':
+                    # Remove espaços extras para campos CHAR
+                    value = value.strip()
+                
+                record[field_name] = value
+                current_pos += field_size
+            
+            if current_pos != len(line):
+                raise ValueError(f"Linha {line_num} mais longa que o esperado: {len(line)} vs {current_pos}")
+            
+            records.append(record)
+        
+        logger.info(f"Total de registros processados: {len(records)}")
+        return records
+        
+    except Exception as e:
+        logger.error(f"Erro ao processar dados: {str(e)}")
+        raise ValueError(f"Erro ao processar dados: {str(e)}")
 
 # Funções de compatibilidade para usar a nova validação com mapeamento
 def validate_database_schema_new(table_name: str, layout_file_path: str) -> bool:

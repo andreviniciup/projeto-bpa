@@ -23,6 +23,7 @@ from werkzeug.utils import secure_filename
 from app.utils.logger import app_logger
 from config import settings
 import pandas as pd
+from app.services.data_sync_service import DataSyncService
 
 logger = logging.getLogger("FileProcessor")
 
@@ -234,24 +235,18 @@ async def process_file(data_file: str, layout_file: str, table_name: str):
         column_mapping = get_column_mapping_for_table(table_name, layout_file)
         logger.info(f"Mapeamento de colunas obtido: {column_mapping}")
         
-        # Lê e processa o arquivo de dados
-        with open(data_file, 'r', encoding='utf-8') as f:
-            data = f.read()
-            
-        if not validate_fixed_width_data(data, layout):
-            raise ValueError(f"Dados não correspondem ao layout especificado")
-            
-        # Processa os dados
-        records = parse_fixed_width_data(data, layout)
+        # Usa o DataSyncService para sincronizar os dados
+        sync_service = DataSyncService()
+        result = sync_service.sync_table_data(table_name, data_file, layout_file)
         
-        # Insere os registros no banco
-        result = await insert_records_safely(table_name, records)
-        
+        if result['status'] == 'error':
+            raise ValueError(result['message'])
+            
         return {
             'table': table_name,
             'status': 'success',
-            'message': f'Processado com sucesso: {len(records)} registros',
-            'details': result
+            'message': f'Processado com sucesso: {result.get("details", {}).get("inserted", 0)} registros inseridos, {result.get("details", {}).get("updated", 0)} atualizados, {result.get("details", {}).get("unchanged", 0)} não alterados',
+            'details': result.get('details', {})
         }
         
     except Exception as e:
